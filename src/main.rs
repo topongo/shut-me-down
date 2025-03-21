@@ -146,9 +146,9 @@ async fn main() {
     let title = args.title.unwrap_or("Unnamed timer".to_owned());
 
     let mut notifiers = vec![];
-    for checkpoint in CHECKPOINTS.iter().chain(vec![&0]).map(|&v| Duration::seconds(v as i64)) {
+    for checkpoint in CHECKPOINTS.iter().chain(vec![&(timeout.num_seconds() as u64)]).map(|&v| Duration::seconds(v as i64)) {
         // skip checkpoint lower than timeout
-        if timeout <= checkpoint {
+        if timeout < checkpoint {
             continue;
         }
         // start async waiters
