@@ -6,7 +6,6 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 struct Command {
-    #[cfg(feature = "notify")]
     #[arg(short, long)]
     title: Option<String>,
     mode: Mode,
