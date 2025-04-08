@@ -3,11 +3,18 @@ use chrono::{Duration, TimeDelta};
 
 use chrono::{Local, NaiveTime};
 use clap::{Parser, ValueEnum};
+#[cfg(feature = "register")]
+use fs4::tokio::AsyncFileExt;
+#[cfg(feature = "register")]
+use tokio::fs::OpenOptions;
 
 #[derive(Parser, Debug)]
 struct Command {
     #[arg(short, long)]
     title: Option<String>,
+    #[cfg(feature = "register")]
+    #[arg(short, long)]
+    register: Option<String>,
     mode: Mode,
     reference: String,
     #[arg(trailing_var_arg = true)]
@@ -140,6 +147,45 @@ async fn main() {
         }
     };
 
+    #[cfg(feature = "register")]
+    let lock = if let Some(ref reg) = args.register {
+        let runtime_str = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or("/tmp".to_owned());
+        let runtime = std::path::PathBuf::from(runtime_str).join("shut-me-down");
+        if !runtime.exists() {
+            if let Err(e) = std::fs::create_dir(&runtime) {
+                eprintln!("couldn't create runtime directory while registering timer: {}", e);
+                exit(1);
+            }
+        }
+        // println!("registering timer under {}", runtime.to_string_lossy());
+        let lockp = runtime.join(format!("{}.lock", reg));
+        
+        let lock = OpenOptions::new()
+            .write(true)
+            .read(false)
+            .create(true)
+            .truncate(true)
+            .open(&lockp)
+            .await
+            .unwrap();
+
+        match lock.try_lock_exclusive() {
+            Ok(v) => if v {
+                println!("Timer registered with id `{}`", reg);
+            } else {
+                // println!("timer already locked under {}, exiting", lockp.to_string_lossy());
+                exit(1);
+            }
+            Err(e) => {
+                eprintln!("couldn't lock timer under {}: {}", lockp.to_string_lossy(), e);
+                exit(1);
+            }
+        }
+
+        Some(lock)
+    } else { None };
+
     println!("Timer will go off in {} (at {})", format_timedelta(timeout), Local::now() + timeout);
 
     let title = args.title.unwrap_or("Unnamed timer".to_owned());
@@ -157,6 +203,14 @@ async fn main() {
     // wait for all async waiters to finish
     for n in notifiers {
         n.await.unwrap();
+    }
+
+    #[cfg(feature = "register")]
+    if let Some(lock) = lock {
+        if let Err(e) = lock.unlock_async().await {
+            eprintln!("couldn't unlock timer: {}", e);
+            exit(1);
+        }
     }
 
     // execute end command if provided, otherwise 
