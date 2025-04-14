@@ -191,7 +191,7 @@ async fn main() {
     let title = args.title.unwrap_or("Unnamed timer".to_owned());
 
     let mut notifiers = vec![];
-    for checkpoint in CHECKPOINTS.iter().chain(vec![&0]).map(|&v| Duration::seconds(v as i64)) {
+    for checkpoint in CHECKPOINTS.iter().chain(vec![&(timeout.num_seconds() as u64)]).map(|&v| Duration::seconds(v as i64)) {
         // skip checkpoint lower than timeout
         if timeout < checkpoint {
             continue;
@@ -199,6 +199,13 @@ async fn main() {
         // start async waiters
         notifiers.push(tokio::spawn(wait_and_notify(timeout, checkpoint, title.clone())));
     }
+
+    let titlec = title.clone();
+
+    notifiers.push(tokio::spawn(async move {
+        wait(timeout, Duration::zero()).await;
+        notify(&titlec, "Time's up!");
+    }));
 
     // wait for all async waiters to finish
     for n in notifiers {
@@ -214,19 +221,16 @@ async fn main() {
     }
 
     // execute end command if provided, otherwise 
-    match command {
-        Some(mut cmd) => {
-            let status = cmd
-                .spawn()
-                .unwrap()
-                .wait()
-                .unwrap();
-            if !status.success() {
-                eprintln!("command failed: {:?}", cmd);
-                exit(1);
-            }
+    if let Some(mut cmd) = command {
+        let status = cmd
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap();
+        if !status.success() {
+            eprintln!("command failed: {:?}", cmd);
+            exit(1);
         }
-        None => notify(&title, "Time's up!"),
     }
     // if !args.exec.is_empty() {
     //     let mut cmd = std::process::Command::new(&args.exec[0])
@@ -238,7 +242,7 @@ async fn main() {
     // }
 }
 
-async fn wait_and_notify(timeout: TimeDelta, checkpoint: TimeDelta, title: String) {
+async fn wait(timeout: Duration, checkpoint: Duration) {
     let wait = timeout - checkpoint;
     #[cfg(debug_assertions)]
     println!("==> sleeping for {:?}", wait);
@@ -249,6 +253,10 @@ async fn wait_and_notify(timeout: TimeDelta, checkpoint: TimeDelta, title: Strin
         // println!("==> sleeping until {:?}", target);
         tokio::time::sleep_until(target).await;
     }
+}
+
+async fn wait_and_notify(timeout: TimeDelta, checkpoint: TimeDelta, title: String) {
+    wait(timeout, checkpoint).await;
     notify(&title, &format!("Will end in {}", format_timedelta(checkpoint)));
 }
 
